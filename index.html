@@ -6,7 +6,7 @@
 <title>Try-On Prototype</title>
 <style>
   :root{
-    --ink:#12151a; --paper:#f6f5f2; --accent:#ff5a36; --muted:#8a8f98;
+    --ink:#12151a; --paper:#f6f5f2; --accent:#ff5a36; --muted:#8a8f98; --good:#3ddc84;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%;}
@@ -14,20 +14,25 @@
     font-family:'SF Mono','JetBrains Mono',ui-monospace,Menlo,monospace; overflow:hidden;}
   #stage{position:relative; width:100vw; height:100vh; background:#000;}
   video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
-  #localVideo{ visibility:hidden; } /* only used to capture the stream */
-  #outputVideo{ z-index:2; }
+  #localVideo{ z-index:1; }
+  #localVideo.mirrored{ transform:scaleX(-1); }
+  #outputVideo{ z-index:2; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #outputVideo.active{ opacity:1; }
 
   #topbar{position:absolute; top:0; left:0; right:0; z-index:5;
     padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 10px;
-    display:flex; align-items:center; justify-content:space-between;
+    display:flex; align-items:flex-start; justify-content:space-between;
     background:linear-gradient(to bottom, rgba(0,0,0,.6), transparent);}
   #topbar .label{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);}
   #topbar .title{font-size:14px;}
-  #status{display:flex; align-items:center; gap:6px; font-size:11px; letter-spacing:.1em; text-transform:uppercase;}
-  #status .dot{width:7px; height:7px; border-radius:50%; background:var(--muted); transition:background .2s;}
-  #status.live .dot{background:#3ddc84; box-shadow:0 0 8px #3ddc84;}
-  #status.err .dot{background:var(--accent);}
-  #status.busy .dot{background:#ffcf56;}
+  #status{display:flex; flex-direction:column; align-items:flex-end; gap:4px;}
+  #statusRow{display:flex; align-items:center; gap:6px; font-size:11px; letter-spacing:.1em; text-transform:uppercase;}
+  #statusRow .dot{width:7px; height:7px; border-radius:50%; background:var(--muted); transition:background .2s;}
+  #statusRow.live .dot{background:var(--good); box-shadow:0 0 8px var(--good);}
+  #statusRow.err .dot{background:var(--accent);}
+  #statusRow.busy .dot{background:#ffcf56;}
+  #costMeter{font-size:10px; color:#ffcf56; opacity:0; transition:opacity .2s;}
+  #costMeter.show{opacity:1;}
 
   #tray{position:absolute; left:0; right:0; bottom:0; z-index:5;
     padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 16px);
@@ -48,12 +53,18 @@
     appearance:none; border:none; background:var(--paper); color:var(--ink);
     border-radius:10px; padding:0 16px; font-family:inherit; font-size:11px;
     letter-spacing:.05em; text-transform:uppercase; font-weight:600;}
+  #promptRow button:disabled{opacity:.5;}
 
   #controls{display:flex; align-items:center; justify-content:space-between; margin-top:10px;}
-  #hint{font-size:10px; letter-spacing:.04em; color:var(--muted); line-height:1.5; max-width:70%;}
+  #hint{font-size:10px; letter-spacing:.04em; color:var(--muted); line-height:1.5; max-width:60%;}
+  #controls .btnrow{display:flex; gap:8px;}
   button#flip{appearance:none; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06);
     color:var(--paper); border-radius:100px; padding:9px 14px; font-family:inherit; font-size:11px;
     letter-spacing:.08em; text-transform:uppercase;}
+  button#stop{appearance:none; border:1px solid var(--accent); background:rgba(255,90,54,.08); color:var(--accent);
+    border-radius:100px; padding:9px 14px; font-family:inherit; font-size:11px;
+    letter-spacing:.08em; text-transform:uppercase; display:none;}
+  button#stop.show{display:inline-block;}
 
   #boot{position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:14px; background:var(--ink); text-align:center; padding:0 30px;}
@@ -76,7 +87,8 @@
 
   #diag{position:absolute; top:70px; left:14px; right:14px; z-index:16;
     background:rgba(0,0,0,.75); border:1px solid rgba(255,255,255,.15); border-radius:12px;
-    padding:10px 12px; font-size:10px; line-height:1.7; color:#9ee6a8; max-height:40vh; overflow-y:auto;}
+    padding:10px 12px; font-size:10px; line-height:1.7; color:#9ee6a8; max-height:35vh; overflow-y:auto; display:none;}
+  #diag.show{display:block;}
   #diag .bad{color:var(--accent);}
   #diag .lbl{color:var(--muted);}
 </style>
@@ -84,15 +96,18 @@
 <body>
 
 <div id="stage">
-  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="localVideo" class="mirrored" autoplay playsinline muted></video>
   <video id="outputVideo" autoplay playsinline muted></video>
 
   <div id="topbar">
     <div>
-      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v1.3</span></div>
+      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v2.0</span></div>
       <div class="title">AI-generated try-on</div>
     </div>
-    <div id="status"><span class="dot"></span><span id="statusText">Idle</span></div>
+    <div id="status">
+      <div id="statusRow"><span class="dot"></span><span id="statusText">Idle</span></div>
+      <div id="costMeter">AI: 0s · ~0 credits (~$0.00)</div>
+    </div>
   </div>
 
   <div id="tray">
@@ -104,10 +119,10 @@
       <button id="applyBtn">Apply</button>
     </div>
     <div id="controls">
-      <div id="hint">Upload a clean, plain-background garment photo, add a short description, tap Apply.</div>
-      <div style="display:flex; gap:8px;">
+      <div id="hint">Preview is free. Applying a garment starts the billed AI session.</div>
+      <div class="btnrow">
         <button id="flip">Flip camera</button>
-        <button id="stop" style="border-color:var(--accent); color:var(--accent);">Stop session</button>
+        <button id="stop">Stop AI</button>
       </div>
     </div>
   </div>
@@ -119,10 +134,10 @@
   <div id="tapToPlay"><button id="tapToPlayBtn">Tap to view</button></div>
 
   <div id="boot">
-    <div class="mark">Prototype · v1.3</div>
+    <div class="mark">Prototype · v2.0</div>
     <h1>Real garments, live</h1>
-    <p>This streams your camera through Decart's Lucy VTON model, which redresses you in real time based on a garment photo and description. No preset clothes — everything comes from what you upload.</p>
-    <button id="startBtn">Start camera</button>
+    <p>Your camera preview is free. The AI redressing (Decart's Lucy VTON) only starts — and only bills — once you upload a garment and tap Apply.</p>
+    <button id="startBtn">Start preview</button>
     <div class="err" id="bootErr"></div>
   </div>
 </div>
@@ -132,8 +147,9 @@ import { createDecartClient, models } from "https://esm.sh/@decartai/sdk";
 
 const localVideo = document.getElementById('localVideo');
 const outputVideo = document.getElementById('outputVideo');
-const statusEl = document.getElementById('status');
+const statusRow = document.getElementById('statusRow');
 const statusText = document.getElementById('statusText');
+const costMeter = document.getElementById('costMeter');
 const boot = document.getElementById('boot');
 const startBtn = document.getElementById('startBtn');
 const bootErr = document.getElementById('bootErr');
@@ -142,8 +158,30 @@ const stopBtn = document.getElementById('stop');
 const tapToPlay = document.getElementById('tapToPlay');
 const tapToPlayBtn = document.getElementById('tapToPlayBtn');
 const diagEl = document.getElementById('diag');
+const garmentsEl = document.getElementById('garments');
+const addGarmentBtn = document.getElementById('addGarment');
+const fileInput = document.getElementById('fileInput');
+const promptInput = document.getElementById('promptInput');
+const applyBtn = document.getElementById('applyBtn');
 
-let diagInterval = null;
+const CREDITS_PER_SEC = 2;   // Lucy 2.5 realtime, 720p — platform.decart.ai/models/lucy-edit-live
+const USD_PER_CREDIT = 0.01; // $10 = 1,000 credits, per your billing history
+
+let facingMode = 'user';
+let stream, rtClient;
+let garments = [];
+let activeIndex = -1;
+let pendingFile = null;
+let sessionBusy = false;
+let frameWatchdog = null;
+let costInterval = null;
+let aiStartedAt = null;
+
+function setStatus(mode, text){
+  statusRow.className = mode;
+  statusText.textContent = text;
+}
+
 function diagLine(label, value, bad){
   return `<div><span class="lbl">${label}:</span> <span class="${bad?'bad':''}">${value}</span></div>`;
 }
@@ -154,52 +192,55 @@ function updateDiag(extra){
   if (track){
     html += diagLine('track readyState', track.readyState, track.readyState !== 'live');
     html += diagLine('track muted', track.muted, track.muted);
-    html += diagLine('track enabled', track.enabled, !track.enabled);
     const s = track.getSettings ? track.getSettings() : {};
     html += diagLine('track size', (s.width||'?') + '×' + (s.height||'?'), !s.width);
   }
   html += diagLine('video element size', outputVideo.videoWidth + '×' + outputVideo.videoHeight, !outputVideo.videoWidth);
-  html += diagLine('video readyState', outputVideo.readyState, outputVideo.readyState < 2);
   html += diagLine('video paused', outputVideo.paused, outputVideo.paused);
-  html += diagLine('video currentTime', outputVideo.currentTime.toFixed(2));
   if (extra) html += diagLine('last event', extra);
   diagEl.innerHTML = html;
-}
-const garmentsEl = document.getElementById('garments');
-const addGarmentBtn = document.getElementById('addGarment');
-const fileInput = document.getElementById('fileInput');
-const promptInput = document.getElementById('promptInput');
-const applyBtn = document.getElementById('applyBtn');
-
-let facingMode = 'user';
-let stream, rtClient;
-let garments = []; // { file, prompt, thumbUrl }
-let activeIndex = -1;
-let pendingFile = null;
-let sessionBusy = false;      // re-entrancy guard: only one connect attempt at a time
-let frameWatchdog = null;     // times out if a session "connects" but no video ever arrives
-
-function setStatus(mode, text){
-  statusEl.className = mode;
-  statusText.textContent = text;
+  diagEl.classList.add('show');
 }
 
-// Tears down whatever is currently running — camera tracks AND the billable
-// realtime session — so a retry never leaves a previous session running
-// in the background.
-async function teardown(){
+function startCostMeter(){
+  aiStartedAt = Date.now();
+  costMeter.classList.add('show');
+  if (costInterval) clearInterval(costInterval);
+  costInterval = setInterval(() => {
+    const secs = (Date.now() - aiStartedAt) / 1000;
+    const credits = secs * CREDITS_PER_SEC;
+    const usd = credits * USD_PER_CREDIT;
+    costMeter.textContent = `AI: ${secs.toFixed(0)}s · ~${credits.toFixed(0)} credits (~$${usd.toFixed(2)})`;
+  }, 500);
+}
+function stopCostMeter(){
+  if (costInterval){ clearInterval(costInterval); costInterval = null; }
+  costMeter.classList.remove('show');
+  aiStartedAt = null;
+}
+
+// Ends the billed AI connection only. Local camera preview keeps running —
+// this is the "stop paying" button, not the "stop camera" button.
+async function disconnectAI(){
   if (frameWatchdog){ clearTimeout(frameWatchdog); frameWatchdog = null; }
   if (rtClient){
     try{ await rtClient.disconnect(); } catch(e){ console.warn('disconnect error', e); }
     rtClient = null;
   }
+  outputVideo.srcObject = null;
+  outputVideo.classList.remove('active');
+  tapToPlay.classList.remove('show');
+  stopCostMeter();
+  stopBtn.classList.remove('show');
+}
+
+// Full teardown: camera + AI. Used on error paths and before switching cameras.
+async function teardownAll(){
+  await disconnectAI();
   if (stream){
     stream.getTracks().forEach(t => t.stop());
     stream = null;
   }
-  outputVideo.srcObject = null;
-  tapToPlay.classList.remove('show');
-  if (diagInterval){ clearInterval(diagInterval); diagInterval = null; }
 }
 
 async function startCamera(){
@@ -209,17 +250,19 @@ async function startCamera(){
     video: { facingMode, frameRate: model.fps, width: model.width, height: model.height }
   });
   localVideo.srcObject = stream;
+  localVideo.classList.toggle('mirrored', facingMode === 'user');
   await localVideo.play();
 }
 
-async function connectDecart(){
+// Opens the billed Decart connection. Only called from applyGarment() —
+// never from the free preview step.
+async function connectAI(){
   const res = await fetch('/api/tokens', { method: 'POST' });
   if (!res.ok) throw new Error('Token request failed (' + res.status + ') — check DECART_API_KEY on the server');
   const { apiKey } = await res.json();
 
   const client = createDecartClient({ apiKey });
   const model = models.realtime("lucy-vton-latest");
-
   let gotFrame = false;
 
   rtClient = await client.realtime.connect(stream, {
@@ -231,12 +274,10 @@ async function connectDecart(){
       outputVideo.srcObject = remoteStream;
       updateDiag('onRemoteStream fired, tracks=' + remoteStream.getTracks().length);
       outputVideo.play().then(() => {
+        outputVideo.classList.add('active');
         setStatus('live', 'Live');
         updateDiag('play() resolved');
       }).catch((playErr) => {
-        // iOS Safari commonly blocks play() here because it wasn't triggered
-        // by a direct tap. The stream IS arriving (and billing) — it just
-        // needs a real user gesture to start rendering.
         console.warn('Autoplay blocked, waiting for tap:', playErr);
         setStatus('busy', 'Tap to view');
         updateDiag('play() rejected: ' + (playErr.message || playErr), true);
@@ -245,41 +286,35 @@ async function connectDecart(){
     }
   });
 
-  // Safety net: if the connection "succeeds" but no actual video ever shows
-  // up (e.g. the account is out of credits, or the model errors after
-  // connecting), stop the session automatically instead of silently
-  // billing an empty black screen.
+  startCostMeter();
+  stopBtn.classList.add('show');
+
   frameWatchdog = setTimeout(async () => {
     if (!gotFrame){
-      console.error('No video received within timeout — stopping session.');
-      await teardown();
-      boot.classList.remove('hidden');
-      bootErr.textContent = 'Connected, but no video ever arrived — the session was stopped automatically to avoid extra usage. This usually means insufficient credits, or the model rejected the request. Check your Decart account, then try again.';
-      setStatus('err', 'Stopped');
-      startBtn.disabled = false;
+      console.error('No video received within timeout — stopping AI session.');
+      await disconnectAI();
+      setStatus('err', 'Stopped — no video');
+      bootErr.textContent = '';
+      applyBtn.disabled = false;
     }
   }, 12000);
 }
 
 async function boot_start(){
-  if (sessionBusy) return; // ignore extra taps while a connection is already in flight
+  if (sessionBusy) return;
   sessionBusy = true;
   startBtn.disabled = true;
   bootErr.textContent = '';
   try{
-    await teardown(); // make sure nothing stale is still running/billing
+    await teardownAll();
     setStatus('busy', 'Requesting camera…');
     await startCamera();
-    setStatus('busy', 'Connecting to model…');
-    await connectDecart();
     boot.classList.add('hidden');
-    setStatus('busy', 'Connected — waiting for video…');
-    if (diagInterval) clearInterval(diagInterval);
-    diagInterval = setInterval(() => updateDiag(), 1000);
+    setStatus('', 'Preview (free)');
   }catch(err){
     console.error(err);
-    await teardown();
-    bootErr.textContent = 'Could not start: ' + (err.message || err) + '. Make sure this is deployed (not a local preview), the /api/tokens endpoint is live, and DECART_API_KEY is set.';
+    await teardownAll();
+    bootErr.textContent = 'Could not start: ' + (err.message || err);
     setStatus('err', 'Error');
     startBtn.disabled = false;
   } finally {
@@ -288,11 +323,8 @@ async function boot_start(){
 }
 
 stopBtn.addEventListener('click', async () => {
-  await teardown();
-  boot.classList.remove('hidden');
-  bootErr.textContent = '';
-  setStatus('', 'Idle');
-  startBtn.disabled = false;
+  await disconnectAI();
+  setStatus('', 'Preview (free)');
 });
 
 tapToPlayBtn.addEventListener('click', () => {
@@ -302,7 +334,6 @@ tapToPlayBtn.addEventListener('click', () => {
   }).catch((e) => console.error('Still could not play:', e));
 });
 
-// --- garment management ---
 function renderGarments(){
   garmentsEl.querySelectorAll('.garment:not(.addBtn)').forEach(el => el.remove());
   garments.forEach((g, i) => {
@@ -339,39 +370,55 @@ applyBtn.addEventListener('click', () => {
   }
 });
 
+// This is the ONLY path that opens (or reuses) the billed AI connection —
+// browsing/uploading garments before this never costs anything.
 async function applyGarment(i){
+  if (!stream){ bootErr.textContent = 'Start the camera preview first.'; return; }
   const g = garments[i];
   activeIndex = i;
   renderGarments();
-  if (!rtClient) return;
-  setStatus('busy', 'Applying…');
+  applyBtn.disabled = true;
   try{
+    if (!rtClient){
+      setStatus('busy', 'Connecting to AI…');
+      await connectAI();
+    }
+    setStatus('busy', 'Applying…');
     await rtClient.set({
       prompt: g.prompt || undefined,
       image: g.file,
-      enhance: !g.prompt // auto-expand if the user left the description blank
+      enhance: !g.prompt
     });
     setStatus('live', 'Live');
   }catch(err){
     console.error(err);
-    setStatus('err', 'Apply failed');
+    setStatus('err', 'Apply failed: ' + (err.message || err));
+  } finally {
+    applyBtn.disabled = false;
   }
 }
 
 startBtn.addEventListener('click', boot_start);
+
 flipBtn.addEventListener('click', async () => {
   if (sessionBusy) return;
   sessionBusy = true;
+  const hadAI = !!rtClient;
+  const lastGarmentIndex = activeIndex;
   facingMode = facingMode === 'user' ? 'environment' : 'user';
   try{
     setStatus('busy', 'Switching camera…');
-    await teardown();       // close the old (billable) session first
+    await teardownAll(); // closes AI (stops billing) and the camera
     await startCamera();
-    await connectDecart();
-    setStatus('busy', 'Connected — waiting for video…');
+    setStatus('', 'Preview (free)');
+    // Re-apply the same garment on the new camera feed only if AI was
+    // actually running before — otherwise stay in free preview.
+    if (hadAI && lastGarmentIndex >= 0){
+      await applyGarment(lastGarmentIndex);
+    }
   } catch(e){
     console.error(e);
-    await teardown();
+    await teardownAll();
     boot.classList.remove('hidden');
     bootErr.textContent = 'Could not switch camera: ' + (e.message || e);
     setStatus('err', 'Error');
