@@ -73,6 +73,12 @@
   #tapToPlay button{appearance:none; border:none; background:var(--paper); color:var(--ink);
     border-radius:100px; padding:14px 30px; font-family:inherit; font-size:13px;
     letter-spacing:.08em; text-transform:uppercase; font-weight:600;}
+
+  #diag{position:absolute; top:70px; left:14px; right:14px; z-index:16;
+    background:rgba(0,0,0,.75); border:1px solid rgba(255,255,255,.15); border-radius:12px;
+    padding:10px 12px; font-size:10px; line-height:1.7; color:#9ee6a8; max-height:40vh; overflow-y:auto;}
+  #diag .bad{color:var(--accent);}
+  #diag .lbl{color:var(--muted);}
 </style>
 </head>
 <body>
@@ -83,7 +89,7 @@
 
   <div id="topbar">
     <div>
-      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v1.2</span></div>
+      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v1.3</span></div>
       <div class="title">AI-generated try-on</div>
     </div>
     <div id="status"><span class="dot"></span><span id="statusText">Idle</span></div>
@@ -108,10 +114,12 @@
 
   <input type="file" id="fileInput" accept="image/*">
 
+  <div id="diag"></div>
+
   <div id="tapToPlay"><button id="tapToPlayBtn">Tap to view</button></div>
 
   <div id="boot">
-    <div class="mark">Prototype · v1.2</div>
+    <div class="mark">Prototype · v1.3</div>
     <h1>Real garments, live</h1>
     <p>This streams your camera through Decart's Lucy VTON model, which redresses you in real time based on a garment photo and description. No preset clothes — everything comes from what you upload.</p>
     <button id="startBtn">Start camera</button>
@@ -133,6 +141,30 @@ const flipBtn = document.getElementById('flip');
 const stopBtn = document.getElementById('stop');
 const tapToPlay = document.getElementById('tapToPlay');
 const tapToPlayBtn = document.getElementById('tapToPlayBtn');
+const diagEl = document.getElementById('diag');
+
+let diagInterval = null;
+function diagLine(label, value, bad){
+  return `<div><span class="lbl">${label}:</span> <span class="${bad?'bad':''}">${value}</span></div>`;
+}
+function updateDiag(extra){
+  let html = '';
+  const track = outputVideo.srcObject ? outputVideo.srcObject.getVideoTracks()[0] : null;
+  html += diagLine('remote stream attached', !!outputVideo.srcObject, !outputVideo.srcObject);
+  if (track){
+    html += diagLine('track readyState', track.readyState, track.readyState !== 'live');
+    html += diagLine('track muted', track.muted, track.muted);
+    html += diagLine('track enabled', track.enabled, !track.enabled);
+    const s = track.getSettings ? track.getSettings() : {};
+    html += diagLine('track size', (s.width||'?') + '×' + (s.height||'?'), !s.width);
+  }
+  html += diagLine('video element size', outputVideo.videoWidth + '×' + outputVideo.videoHeight, !outputVideo.videoWidth);
+  html += diagLine('video readyState', outputVideo.readyState, outputVideo.readyState < 2);
+  html += diagLine('video paused', outputVideo.paused, outputVideo.paused);
+  html += diagLine('video currentTime', outputVideo.currentTime.toFixed(2));
+  if (extra) html += diagLine('last event', extra);
+  diagEl.innerHTML = html;
+}
 const garmentsEl = document.getElementById('garments');
 const addGarmentBtn = document.getElementById('addGarment');
 const fileInput = document.getElementById('fileInput');
@@ -167,6 +199,7 @@ async function teardown(){
   }
   outputVideo.srcObject = null;
   tapToPlay.classList.remove('show');
+  if (diagInterval){ clearInterval(diagInterval); diagInterval = null; }
 }
 
 async function startCamera(){
@@ -196,14 +229,17 @@ async function connectDecart(){
       gotFrame = true;
       if (frameWatchdog){ clearTimeout(frameWatchdog); frameWatchdog = null; }
       outputVideo.srcObject = remoteStream;
+      updateDiag('onRemoteStream fired, tracks=' + remoteStream.getTracks().length);
       outputVideo.play().then(() => {
         setStatus('live', 'Live');
+        updateDiag('play() resolved');
       }).catch((playErr) => {
         // iOS Safari commonly blocks play() here because it wasn't triggered
         // by a direct tap. The stream IS arriving (and billing) — it just
         // needs a real user gesture to start rendering.
         console.warn('Autoplay blocked, waiting for tap:', playErr);
         setStatus('busy', 'Tap to view');
+        updateDiag('play() rejected: ' + (playErr.message || playErr), true);
         tapToPlay.classList.add('show');
       });
     }
@@ -238,6 +274,8 @@ async function boot_start(){
     await connectDecart();
     boot.classList.add('hidden');
     setStatus('busy', 'Connected — waiting for video…');
+    if (diagInterval) clearInterval(diagInterval);
+    diagInterval = setInterval(() => updateDiag(), 1000);
   }catch(err){
     console.error(err);
     await teardown();
