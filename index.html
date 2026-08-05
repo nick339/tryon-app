@@ -92,7 +92,10 @@
     </div>
     <div id="controls">
       <div id="hint">Upload a clean, plain-background garment photo, add a short description, tap Apply.</div>
-      <button id="flip">Flip camera</button>
+      <div style="display:flex; gap:8px;">
+        <button id="flip">Flip camera</button>
+        <button id="stop" style="border-color:var(--accent); color:var(--accent);">Stop session</button>
+      </div>
     </div>
   </div>
 
@@ -118,6 +121,7 @@ const boot = document.getElementById('boot');
 const startBtn = document.getElementById('startBtn');
 const bootErr = document.getElementById('bootErr');
 const flipBtn = document.getElementById('flip');
+const stopBtn = document.getElementById('stop');
 const garmentsEl = document.getElementById('garments');
 const addGarmentBtn = document.getElementById('addGarment');
 const fileInput = document.getElementById('fileInput');
@@ -129,14 +133,31 @@ let stream, rtClient;
 let garments = []; // { file, prompt, thumbUrl }
 let activeIndex = -1;
 let pendingFile = null;
+let sessionBusy = false;      // re-entrancy guard: only one connect attempt at a time
+let frameWatchdog = null;     // times out if a session "connects" but no video ever arrives
 
 function setStatus(mode, text){
   statusEl.className = mode;
   statusText.textContent = text;
 }
 
+// Tears down whatever is currently running — camera tracks AND the billable
+// realtime session — so a retry never leaves a previous session running
+// in the background.
+async function teardown(){
+  if (frameWatchdog){ clearTimeout(frameWatchdog); frameWatchdog = null; }
+  if (rtClient){
+    try{ await rtClient.disconnect(); } catch(e){ console.warn('disconnect error', e); }
+    rtClient = null;
+  }
+  if (stream){
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  outputVideo.srcObject = null;
+}
+
 async function startCamera(){
-  if (stream) stream.getTracks().forEach(t => t.stop());
   const model = models.realtime("lucy-vton-latest");
   stream = await navigator.mediaDevices.getUserMedia({
     audio: true,
@@ -154,30 +175,67 @@ async function connectDecart(){
   const client = createDecartClient({ apiKey });
   const model = models.realtime("lucy-vton-latest");
 
+  let gotFrame = false;
+
   rtClient = await client.realtime.connect(stream, {
     model,
     mirror: 'auto',
     onRemoteStream: (remoteStream) => {
+      gotFrame = true;
+      if (frameWatchdog){ clearTimeout(frameWatchdog); frameWatchdog = null; }
       outputVideo.srcObject = remoteStream;
       outputVideo.play().catch(()=>{});
+      setStatus('live', 'Live');
     }
   });
+
+  // Safety net: if the connection "succeeds" but no actual video ever shows
+  // up (e.g. the account is out of credits, or the model errors after
+  // connecting), stop the session automatically instead of silently
+  // billing an empty black screen.
+  frameWatchdog = setTimeout(async () => {
+    if (!gotFrame){
+      console.error('No video received within timeout — stopping session.');
+      await teardown();
+      boot.classList.remove('hidden');
+      bootErr.textContent = 'Connected, but no video ever arrived — the session was stopped automatically to avoid extra usage. This usually means insufficient credits, or the model rejected the request. Check your Decart account, then try again.';
+      setStatus('err', 'Stopped');
+      startBtn.disabled = false;
+    }
+  }, 12000);
 }
 
 async function boot_start(){
+  if (sessionBusy) return; // ignore extra taps while a connection is already in flight
+  sessionBusy = true;
+  startBtn.disabled = true;
+  bootErr.textContent = '';
   try{
+    await teardown(); // make sure nothing stale is still running/billing
     setStatus('busy', 'Requesting camera…');
     await startCamera();
     setStatus('busy', 'Connecting to model…');
     await connectDecart();
     boot.classList.add('hidden');
-    setStatus('live', 'Live');
+    setStatus('busy', 'Connected — waiting for video…');
   }catch(err){
     console.error(err);
+    await teardown();
     bootErr.textContent = 'Could not start: ' + (err.message || err) + '. Make sure this is deployed (not a local preview), the /api/tokens endpoint is live, and DECART_API_KEY is set.';
     setStatus('err', 'Error');
+    startBtn.disabled = false;
+  } finally {
+    sessionBusy = false;
   }
 }
+
+stopBtn.addEventListener('click', async () => {
+  await teardown();
+  boot.classList.remove('hidden');
+  bootErr.textContent = '';
+  setStatus('', 'Idle');
+  startBtn.disabled = false;
+});
 
 // --- garment management ---
 function renderGarments(){
@@ -237,11 +295,25 @@ async function applyGarment(i){
 
 startBtn.addEventListener('click', boot_start);
 flipBtn.addEventListener('click', async () => {
+  if (sessionBusy) return;
+  sessionBusy = true;
   facingMode = facingMode === 'user' ? 'environment' : 'user';
   try{
+    setStatus('busy', 'Switching camera…');
+    await teardown();       // close the old (billable) session first
     await startCamera();
-    if (rtClient) await connectDecart();
-  } catch(e){ console.error(e); }
+    await connectDecart();
+    setStatus('busy', 'Connected — waiting for video…');
+  } catch(e){
+    console.error(e);
+    await teardown();
+    boot.classList.remove('hidden');
+    bootErr.textContent = 'Could not switch camera: ' + (e.message || e);
+    setStatus('err', 'Error');
+    startBtn.disabled = false;
+  } finally {
+    sessionBusy = false;
+  }
 });
 </script>
 </body>
