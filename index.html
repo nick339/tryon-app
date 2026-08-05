@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Try-On Prototype</title>
+<style>
+  :root{
+    --ink:#12151a; --paper:#f6f5f2; --accent:#ff5a36; --muted:#8a8f98;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{margin:0; background:var(--ink); color:var(--paper);
+    font-family:'SF Mono','JetBrains Mono',ui-monospace,Menlo,monospace; overflow:hidden;}
+  #stage{position:relative; width:100vw; height:100vh; background:#000;}
+  video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+  #localVideo{ visibility:hidden; } /* only used to capture the stream */
+  #outputVideo{ z-index:2; }
+
+  #topbar{position:absolute; top:0; left:0; right:0; z-index:5;
+    padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 10px;
+    display:flex; align-items:center; justify-content:space-between;
+    background:linear-gradient(to bottom, rgba(0,0,0,.6), transparent);}
+  #topbar .label{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);}
+  #topbar .title{font-size:14px;}
+  #status{display:flex; align-items:center; gap:6px; font-size:11px; letter-spacing:.1em; text-transform:uppercase;}
+  #status .dot{width:7px; height:7px; border-radius:50%; background:var(--muted); transition:background .2s;}
+  #status.live .dot{background:#3ddc84; box-shadow:0 0 8px #3ddc84;}
+  #status.err .dot{background:var(--accent);}
+  #status.busy .dot{background:#ffcf56;}
+
+  #tray{position:absolute; left:0; right:0; bottom:0; z-index:5;
+    padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 16px);
+    background:linear-gradient(to top, rgba(0,0,0,.75), transparent);}
+  #garments{display:flex; gap:10px; overflow-x:auto; padding-bottom:8px; scrollbar-width:none;}
+  #garments::-webkit-scrollbar{display:none;}
+  .garment{flex:0 0 auto; width:56px; height:56px; border-radius:14px;
+    border:2px solid rgba(255,255,255,.15); overflow:hidden; position:relative; background:#1c2027;}
+  .garment.active{border-color:var(--paper);}
+  .garment img{width:100%; height:100%; object-fit:cover;}
+  .garment.addBtn{display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--muted);}
+
+  #promptRow{display:flex; gap:8px; margin-top:6px;}
+  #promptRow input[type=text]{
+    flex:1; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+    border-radius:10px; padding:10px 12px; color:var(--paper); font-family:inherit; font-size:12px;}
+  #promptRow button{
+    appearance:none; border:none; background:var(--paper); color:var(--ink);
+    border-radius:10px; padding:0 16px; font-family:inherit; font-size:11px;
+    letter-spacing:.05em; text-transform:uppercase; font-weight:600;}
+
+  #controls{display:flex; align-items:center; justify-content:space-between; margin-top:10px;}
+  #hint{font-size:10px; letter-spacing:.04em; color:var(--muted); line-height:1.5; max-width:70%;}
+  button#flip{appearance:none; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06);
+    color:var(--paper); border-radius:100px; padding:9px 14px; font-family:inherit; font-size:11px;
+    letter-spacing:.08em; text-transform:uppercase;}
+
+  #boot{position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; background:var(--ink); text-align:center; padding:0 30px;}
+  #boot .mark{font-size:12px; letter-spacing:.2em; color:var(--accent); text-transform:uppercase;}
+  #boot h1{font-size:19px; margin:0; font-weight:500;}
+  #boot p{font-size:12px; color:var(--muted); margin:0; line-height:1.6; max-width:320px;}
+  #boot button{margin-top:8px; appearance:none; border:none; background:var(--paper); color:var(--ink);
+    border-radius:100px; padding:13px 28px; font-family:inherit; font-size:12px; letter-spacing:.1em;
+    text-transform:uppercase; font-weight:600;}
+  #boot .err{color:var(--accent); font-size:11px; max-width:320px;}
+  #boot.hidden{display:none;}
+  #fileInput{display:none;}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="outputVideo" autoplay playsinline muted></video>
+
+  <div id="topbar">
+    <div>
+      <div class="label">Fit Prototype 02</div>
+      <div class="title">AI-generated try-on</div>
+    </div>
+    <div id="status"><span class="dot"></span><span id="statusText">Idle</span></div>
+  </div>
+
+  <div id="tray">
+    <div id="garments">
+      <div class="garment addBtn" id="addGarment">+</div>
+    </div>
+    <div id="promptRow">
+      <input type="text" id="promptInput" placeholder="Describe the garment (color, material, fit)…">
+      <button id="applyBtn">Apply</button>
+    </div>
+    <div id="controls">
+      <div id="hint">Upload a clean, plain-background garment photo, add a short description, tap Apply.</div>
+      <button id="flip">Flip camera</button>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept="image/*">
+
+  <div id="boot">
+    <div class="mark">Prototype</div>
+    <h1>Real garments, live</h1>
+    <p>This streams your camera through Decart's Lucy VTON model, which redresses you in real time based on a garment photo and description. No preset clothes — everything comes from what you upload.</p>
+    <button id="startBtn">Start camera</button>
+    <div class="err" id="bootErr"></div>
+  </div>
+</div>
+
+<script type="module">
+import { createDecartClient, models } from "https://esm.sh/@decartai/sdk";
+
+const localVideo = document.getElementById('localVideo');
+const outputVideo = document.getElementById('outputVideo');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const boot = document.getElementById('boot');
+const startBtn = document.getElementById('startBtn');
+const bootErr = document.getElementById('bootErr');
+const flipBtn = document.getElementById('flip');
+const garmentsEl = document.getElementById('garments');
+const addGarmentBtn = document.getElementById('addGarment');
+const fileInput = document.getElementById('fileInput');
+const promptInput = document.getElementById('promptInput');
+const applyBtn = document.getElementById('applyBtn');
+
+let facingMode = 'user';
+let stream, rtClient;
+let garments = []; // { file, prompt, thumbUrl }
+let activeIndex = -1;
+let pendingFile = null;
+
+function setStatus(mode, text){
+  statusEl.className = mode;
+  statusText.textContent = text;
+}
+
+async function startCamera(){
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const model = models.realtime("lucy-vton-latest");
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: { facingMode, frameRate: model.fps, width: model.width, height: model.height }
+  });
+  localVideo.srcObject = stream;
+  await localVideo.play();
+}
+
+async function connectDecart(){
+  const res = await fetch('/api/tokens', { method: 'POST' });
+  if (!res.ok) throw new Error('Token request failed (' + res.status + ') — check DECART_API_KEY on the server');
+  const { apiKey } = await res.json();
+
+  const client = createDecartClient({ apiKey });
+  const model = models.realtime("lucy-vton-latest");
+
+  rtClient = await client.realtime.connect(stream, {
+    model,
+    mirror: 'auto',
+    onRemoteStream: (remoteStream) => {
+      outputVideo.srcObject = remoteStream;
+      outputVideo.play().catch(()=>{});
+    }
+  });
+}
+
+async function boot_start(){
+  try{
+    setStatus('busy', 'Requesting camera…');
+    await startCamera();
+    setStatus('busy', 'Connecting to model…');
+    await connectDecart();
+    boot.classList.add('hidden');
+    setStatus('live', 'Live');
+  }catch(err){
+    console.error(err);
+    bootErr.textContent = 'Could not start: ' + (err.message || err) + '. Make sure this is deployed (not a local preview), the /api/tokens endpoint is live, and DECART_API_KEY is set.';
+    setStatus('err', 'Error');
+  }
+}
+
+// --- garment management ---
+function renderGarments(){
+  garmentsEl.querySelectorAll('.garment:not(.addBtn)').forEach(el => el.remove());
+  garments.forEach((g, i) => {
+    const el = document.createElement('div');
+    el.className = 'garment' + (i === activeIndex ? ' active' : '');
+    el.innerHTML = `<img src="${g.thumbUrl}" alt="">`;
+    el.addEventListener('click', () => applyGarment(i));
+    garmentsEl.insertBefore(el, addGarmentBtn);
+  });
+}
+
+addGarmentBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  pendingFile = file;
+  promptInput.value = '';
+  promptInput.placeholder = 'Describe this garment (color, material, fit)…';
+  promptInput.focus();
+});
+
+applyBtn.addEventListener('click', () => {
+  if (pendingFile){
+    const thumbUrl = URL.createObjectURL(pendingFile);
+    garments.push({ file: pendingFile, prompt: promptInput.value.trim(), thumbUrl });
+    activeIndex = garments.length - 1;
+    pendingFile = null;
+    renderGarments();
+    applyGarment(activeIndex);
+  } else if (activeIndex >= 0) {
+    garments[activeIndex].prompt = promptInput.value.trim();
+    applyGarment(activeIndex);
+  }
+});
+
+async function applyGarment(i){
+  const g = garments[i];
+  activeIndex = i;
+  renderGarments();
+  if (!rtClient) return;
+  setStatus('busy', 'Applying…');
+  try{
+    await rtClient.set({
+      prompt: g.prompt || undefined,
+      image: g.file,
+      enhance: !g.prompt // auto-expand if the user left the description blank
+    });
+    setStatus('live', 'Live');
+  }catch(err){
+    console.error(err);
+    setStatus('err', 'Apply failed');
+  }
+}
+
+startBtn.addEventListener('click', boot_start);
+flipBtn.addEventListener('click', async () => {
+  facingMode = facingMode === 'user' ? 'environment' : 'user';
+  try{
+    await startCamera();
+    if (rtClient) await connectDecart();
+  } catch(e){ console.error(e); }
+});
+</script>
+</body>
+</html>
