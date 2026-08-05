@@ -66,6 +66,13 @@
   #boot .err{color:var(--accent); font-size:11px; max-width:320px;}
   #boot.hidden{display:none;}
   #fileInput{display:none;}
+
+  #tapToPlay{position:absolute; inset:0; z-index:15; display:none;
+    align-items:center; justify-content:center; background:rgba(0,0,0,.55);}
+  #tapToPlay.show{display:flex;}
+  #tapToPlay button{appearance:none; border:none; background:var(--paper); color:var(--ink);
+    border-radius:100px; padding:14px 30px; font-family:inherit; font-size:13px;
+    letter-spacing:.08em; text-transform:uppercase; font-weight:600;}
 </style>
 </head>
 <body>
@@ -76,7 +83,7 @@
 
   <div id="topbar">
     <div>
-      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v1.1</span></div>
+      <div class="label">Fit Prototype 02 <span id="buildTag" style="opacity:.6;">· v1.2</span></div>
       <div class="title">AI-generated try-on</div>
     </div>
     <div id="status"><span class="dot"></span><span id="statusText">Idle</span></div>
@@ -101,8 +108,10 @@
 
   <input type="file" id="fileInput" accept="image/*">
 
+  <div id="tapToPlay"><button id="tapToPlayBtn">Tap to view</button></div>
+
   <div id="boot">
-    <div class="mark">Prototype · v1.1</div>
+    <div class="mark">Prototype · v1.2</div>
     <h1>Real garments, live</h1>
     <p>This streams your camera through Decart's Lucy VTON model, which redresses you in real time based on a garment photo and description. No preset clothes — everything comes from what you upload.</p>
     <button id="startBtn">Start camera</button>
@@ -122,6 +131,8 @@ const startBtn = document.getElementById('startBtn');
 const bootErr = document.getElementById('bootErr');
 const flipBtn = document.getElementById('flip');
 const stopBtn = document.getElementById('stop');
+const tapToPlay = document.getElementById('tapToPlay');
+const tapToPlayBtn = document.getElementById('tapToPlayBtn');
 const garmentsEl = document.getElementById('garments');
 const addGarmentBtn = document.getElementById('addGarment');
 const fileInput = document.getElementById('fileInput');
@@ -155,6 +166,7 @@ async function teardown(){
     stream = null;
   }
   outputVideo.srcObject = null;
+  tapToPlay.classList.remove('show');
 }
 
 async function startCamera(){
@@ -184,8 +196,16 @@ async function connectDecart(){
       gotFrame = true;
       if (frameWatchdog){ clearTimeout(frameWatchdog); frameWatchdog = null; }
       outputVideo.srcObject = remoteStream;
-      outputVideo.play().catch(()=>{});
-      setStatus('live', 'Live');
+      outputVideo.play().then(() => {
+        setStatus('live', 'Live');
+      }).catch((playErr) => {
+        // iOS Safari commonly blocks play() here because it wasn't triggered
+        // by a direct tap. The stream IS arriving (and billing) — it just
+        // needs a real user gesture to start rendering.
+        console.warn('Autoplay blocked, waiting for tap:', playErr);
+        setStatus('busy', 'Tap to view');
+        tapToPlay.classList.add('show');
+      });
     }
   });
 
@@ -235,6 +255,13 @@ stopBtn.addEventListener('click', async () => {
   bootErr.textContent = '';
   setStatus('', 'Idle');
   startBtn.disabled = false;
+});
+
+tapToPlayBtn.addEventListener('click', () => {
+  outputVideo.play().then(() => {
+    tapToPlay.classList.remove('show');
+    setStatus('live', 'Live');
+  }).catch((e) => console.error('Still could not play:', e));
 });
 
 // --- garment management ---
